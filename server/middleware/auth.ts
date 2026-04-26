@@ -24,26 +24,33 @@ export const protect = async (req: AuthRequest, res: Response, next: NextFunctio
     try {
       token = req.headers.authorization.split(' ')[1];
       
-      // Verify token with Supabase
+      // Verify token with Supabase - this is a secure server-side check
       const { data: { user: supabaseUser }, error } = await supabase.auth.getUser(token);
       
       if (error || !supabaseUser) {
         throw new Error('Supabase verification failed');
       }
 
-      // Find or create local user to maintain database relations
+      // Find or create local user. 
+      // CRITICAL: Role is managed by our DB, NOT by user-updatable metadata.
       let localUser = await User.findOne({ email: supabaseUser.email });
       
+      const adminEmail = 'eaasante333@gmail.com';
+
       if (!localUser) {
+        // First time login - assign default role or Admin if it's the owner
         localUser = await User.create({
           name: supabaseUser.user_metadata?.name || supabaseUser.email?.split('@')[0] || 'User',
           email: supabaseUser.email,
-          password: 'supabase_managed_' + Math.random().toString(36).substring(7),
-          role: supabaseUser.user_metadata?.role || (supabaseUser.email === 'eaasante333@gmail.com' ? 'Admin' : 'Student'),
+          password: 'SUPABASE_MANAGED_ACCOUNT', // Placeholder, not used for login
+          role: supabaseUser.email === adminEmail ? 'Admin' : 'Student',
         });
-      } else if (supabaseUser.email === 'eaasante333@gmail.com' && localUser.role !== 'Admin') {
-        localUser.role = 'Admin';
-        await localUser.save();
+      } else {
+        // Ensure owner always has Admin status
+        if (supabaseUser.email === adminEmail && localUser.role !== 'Admin') {
+          localUser.role = 'Admin';
+          await localUser.save();
+        }
       }
 
       req.user = localUser;

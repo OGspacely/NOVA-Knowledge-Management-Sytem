@@ -6,6 +6,22 @@ import { Article } from '../models/Article.ts';
 import { AuditLog } from '../models/AuditLog.ts';
 import { protect, authorize, AuthRequest } from '../middleware/auth.ts';
 
+import { z } from 'zod';
+import { validate } from '../middleware/validate.ts';
+
+const articleSchema = z.object({
+  body: z.object({
+    title: z.string().min(5, 'Title must be at least 5 characters'),
+    content: z.string().min(20, 'Content must be at least 20 characters'),
+    subject: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid subject ID'),
+    topic: z.string().regex(/^[0-9a-fA-F]{24}$/, 'Invalid topic ID').optional(),
+    gradeLevel: z.string(),
+    tags: z.union([z.string(), z.array(z.string())]).optional(),
+    youtubeLinks: z.string().optional(),
+    submitForReview: z.union([z.string(), z.boolean()]).optional(),
+  }),
+});
+
 const router = express.Router();
 
 // Ensure uploads directory exists
@@ -88,7 +104,7 @@ router.get('/:id', protect, async (req, res) => {
 });
 
 // Create article (Teacher/Student/Admin)
-router.post('/', protect, upload.array('files', 5), async (req: AuthRequest, res) => {
+router.post('/', protect, validate(articleSchema), upload.array('files', 5), async (req: AuthRequest, res) => {
   try {
     const files = req.files as Express.Multer.File[];
     const attachments = files ? files.map(file => ({
@@ -102,11 +118,22 @@ router.post('/', protect, upload.array('files', 5), async (req: AuthRequest, res
       delete articleData.topic;
     }
 
+    let youtubeLinks = [];
+    if (req.body.youtubeLinks) {
+      try {
+        youtubeLinks = typeof req.body.youtubeLinks === 'string' 
+          ? JSON.parse(req.body.youtubeLinks) 
+          : req.body.youtubeLinks;
+      } catch (e) {
+        // Fallback or ignore malformed JSON
+      }
+    }
+
     const article = new Article({
       ...articleData,
       tags: req.body.tags ? (typeof req.body.tags === 'string' ? req.body.tags.split(',').map((t: string) => t.trim()).filter((t: string) => t) : req.body.tags) : [],
       attachments,
-      youtubeLinks: req.body.youtubeLinks ? JSON.parse(req.body.youtubeLinks) : [],
+      youtubeLinks,
       author: req.user._id,
       status: req.body.submitForReview === 'true' || req.body.submitForReview === true ? 'Pending' : 'Draft'
     });
